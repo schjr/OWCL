@@ -1,0 +1,9 @@
+.idea/
+
+checkpoints/
+
+logs/wandb
+
+model_path/
+
+data/imgs

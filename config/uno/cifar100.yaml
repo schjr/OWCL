@@ -1,0 +1,9 @@
+dataset:
+  CIFAR100
+
+gpus:
+  1
+
+max_epochs:
+  500
+
