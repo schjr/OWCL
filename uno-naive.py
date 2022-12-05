@@ -140,9 +140,9 @@ def main(args):
         optimizer.load_state_dict(checkpoint['optimizer'])
 
     for epoch in range(start_epoch, args.max_epochs):
-        # loss_per_head = train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, wandb)
-        # best_head = torch.argmin(loss_per_head)
-        best_head = 0
+        loss_per_head = train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, wandb)
+        best_head = torch.argmin(loss_per_head)
+        # best_head = 0
         test_results = test(args, model, original_model, test_dataloader, best_head, prefix="test")
         train_results = test(args, model, original_model, val_dataloader, best_head, prefix="train")
 
