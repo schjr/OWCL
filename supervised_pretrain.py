@@ -40,7 +40,7 @@ def main(args):
 
     # define model
     model = MultiHeadResNet(arch=args.arch,
-                            low_res="CIFAR" in args.dataset or "tiny" in args.dataset,
+                            low_res="CIFAR" in args.dataset or "Tiny" in args.dataset,
                             num_labeled=args.num_labeled_classes,
                             num_unlabeled=args.num_unlabeled_classes,
                             num_heads=None)

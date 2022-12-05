@@ -11,6 +11,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import os
 import scipy.io as io
+import ipdb
 
 
 def accuracy(output, target, topk=(1,)):
@@ -44,6 +45,8 @@ def cluster_acc(y_true, y_pred):
     return sum([w[i, j] for i, j in mapping]) * 1.0 / y_pred.size
 
 
+
+
 def compute_best_mapping(y_true, y_pred):
     y_true = y_true.astype(np.int64)
     y_pred = y_pred.astype(np.int64)
@@ -69,6 +72,7 @@ def split_cluster_acc_v1(y_true, y_pred, num_seen):
     y_true = y_true.astype(int)
     y_pred = y_pred.astype(int)
 
+    ipdb.set_trace()
     seen_acc = np.mean(y_true[mask] == y_pred[mask])
 
     novel_acc = cluster_acc(y_true[~mask], y_pred[~mask])
@@ -232,6 +236,87 @@ def split_cluster_acc_v3(y_true, y_pred, num_seen, head_num, iteration_num):
     io.savemat(mat_dump_path, {"coff_mat": w, "assignment": assignment})
 
 
+
+    return {"all": all_acc, "all_nmi": all_nmi, "all_ari": all_ari, "seen": seen_acc,
+            "novel": novel_acc, "novel_nmi": novel_nmi, "novel_ari": novel_ari}
+
+
+def compute_best_mapping_refined(y_true, y_pred, num_seen):
+    """
+    Calculate clustering mapping. Require scikit-learn installed
+
+    # Arguments
+        y_true: true labels, numpy.array with shape `(n_samples,)`
+        y_pred: predicted labels, numpy.array with shape `(n_samples,)`
+        num_seen: num of seen classes
+
+    # Return
+        mapping: a mapping which preserves seen and permutes unseen
+        w: the confusion matrix without being mapped
+    """
+    y_true = y_true.astype(np.int64)
+    y_pred = y_pred.astype(np.int64)
+    assert y_pred.size == y_true.size
+    D = max(y_pred.max(), y_true.max()) + 1
+    w = np.zeros((D, D), dtype=np.int64)
+    for i in range(y_pred.size):
+        w[y_pred[i], y_true[i]] += 1
+    limited_w = w[num_seen:,num_seen:]
+    unseen_mapping = np.transpose(np.asarray(linear_sum_assignment(limited_w.max() - limited_w)))
+    GT_unseen_mapping = np.array([[i+num_seen, j+num_seen] for [i, j] in unseen_mapping])
+    seen_mapping = np.array([[i, i] for i in range(num_seen)])
+    mapping = np.concatenate([seen_mapping, GT_unseen_mapping])
+    return mapping, w
+
+def cluster_acc_refined(y_true, y_pred, num_seen):
+    """
+    Calculate clustering accuracy. Require scikit-learn installed
+
+    # Arguments
+        y: true labels, numpy.array with shape `(n_samples,)`
+        y_pred: predicted labels, numpy.array with shape `(n_samples,)`
+        num_seen: num of seen classes
+
+    # Return
+        accuracy, in [0,1]
+    """
+    mapping, w = compute_best_mapping_refined(y_true, y_pred, num_seen)
+    return sum([w[i, j] for i, j in mapping]) * 1.0 / y_pred.size
+
+
+def split_cluster_acc_v4(y_true, y_pred, num_seen, draw=False):
+    """
+    Evaluate clustering metrics on two subsets of data, as defined by the mask 'mask'
+    (Mask usually corresponding to `Old' and `New' classes in GCD setting)
+    Fair evaluation according to Class-iNCD
+    :param targets: All ground truth labels
+    :param preds: All predictions
+    :param mask: Mask defining two subsets
+    :return:
+    """
+
+    mask = y_true < num_seen
+    y_true = y_true.astype(int)
+    y_pred = y_pred.astype(int)
+
+    seen_acc = np.mean(y_true[mask] == y_pred[mask])
+
+    novel_acc = cluster_acc_refined(y_true[~mask], y_pred[~mask], num_seen)
+    novel_nmi = metrics.normalized_mutual_info_score(y_true[~mask], y_pred[~mask])
+    novel_ari = metrics.adjusted_rand_score(y_true[~mask], y_pred[~mask])
+
+    all_acc = cluster_acc_refined(y_true, y_pred, num_seen)
+    all_nmi = metrics.normalized_mutual_info_score(y_true[mask], y_pred[mask])
+    all_ari = metrics.adjusted_rand_score(y_true[mask], y_pred[mask])
+
+    if draw:
+        assignment, w = compute_best_mapping_refined(y_true, y_pred, num_seen)
+        txt_dump_path = os.path.join("data/imgs/confusion_matrix-ConfMat.txt")
+        assign_dump_path = os.path.join("data/imgs/confusion_matrix-AssignMent.txt")
+        mat_dump_path = os.path.join("data/imgs/confusion_matrix-ConfMat.mat")
+        np.savetxt(txt_dump_path, w)
+        np.savetxt(assign_dump_path, assignment)
+        io.savemat(mat_dump_path, {"coff_mat": w, "assignment": assignment})
 
     return {"all": all_acc, "all_nmi": all_nmi, "all_ari": all_ari, "seen": seen_acc,
             "novel": novel_acc, "novel_nmi": novel_nmi, "novel_ari": novel_ari}

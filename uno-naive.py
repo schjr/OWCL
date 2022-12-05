@@ -16,7 +16,7 @@ import os
 from argparse import ArgumentParser
 from datetime import datetime
 from tqdm import tqdm
-from utils.eval import split_cluster_acc_v1, split_cluster_acc_v2
+from utils.eval import split_cluster_acc_v1, split_cluster_acc_v2, split_cluster_acc_v4
 import numpy as np
 from losses.sinkhorn_knopp import SinkhornKnopp
 from utils.utils import model_statistics
@@ -57,7 +57,7 @@ def main(args):
     # define model
     model = MultiHeadResNet(
         arch=args.arch,
-        low_res="CIFAR" in args.dataset or "tiny" in args.dataset,
+        low_res="CIFAR" in args.dataset or "Tiny" in args.dataset,
         num_labeled=args.num_labeled_classes,
         num_unlabeled=args.num_unlabeled_classes,
         proj_dim=args.proj_dim,
@@ -69,7 +69,7 @@ def main(args):
 
     original_model = MultiHeadResNet(
         arch=args.arch,
-        low_res="CIFAR" in args.dataset or "tiny" in args.dataset,
+        low_res="CIFAR" in args.dataset or "Tiny" in args.dataset,
         num_labeled=args.num_labeled_classes,
         num_unlabeled=args.num_unlabeled_classes,
         proj_dim=args.proj_dim,
@@ -134,14 +134,15 @@ def main(args):
     if args.resume:
         # Load checkpoint.
         print('==> Resuming from checkpoint..')
-        checkpoint = torch.load('model_path/...........')
+        checkpoint = torch.load('model_path/discover-resnet18-CIFAR10Con-UNO-continual-55-5-5-10_198checkpoint.pth.tar')
         start_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
 
     for epoch in range(start_epoch, args.max_epochs):
-        loss_per_head = train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, wandb)
-        best_head = torch.argmin(loss_per_head)
+        # loss_per_head = train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, wandb)
+        # best_head = torch.argmin(loss_per_head)
+        best_head = 0
         test_results = test(args, model, original_model, test_dataloader, best_head, prefix="test")
         train_results = test(args, model, original_model, val_dataloader, best_head, prefix="train")
 
@@ -185,7 +186,6 @@ def swapped_prediction(args, logits, targets):
 def train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, logger):
     model.train()
     bar = tqdm(train_dataloader)
-    nlc = args.num_labeled_classes
     scaler = GradScaler()
     amp_cm = autocast() if args.amp else contextlib.nullcontext()
 
@@ -291,7 +291,7 @@ def test(args, model, original_model, val_dataloader, best_head, prefix):
 
     results = {}
     for head in range(args.num_heads):
-        _res = split_cluster_acc_v2(all_labels, all_preds[head], num_seen=args.num_labeled_classes)
+        _res = split_cluster_acc_v4(all_labels, all_preds[head], num_seen=args.num_labeled_classes, draw=True)
         for key, value in _res.items():
             if key in results.keys():
                 results[key].append(value)
