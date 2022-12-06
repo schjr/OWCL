@@ -16,7 +16,7 @@ import os
 from argparse import ArgumentParser
 from datetime import datetime
 from tqdm import tqdm
-from utils.eval import split_cluster_acc_v1, split_cluster_acc_v2, split_cluster_acc_v4
+from utils.eval import split_cluster_acc_v1, split_cluster_acc_v2, split_cluster_acc_v3
 import numpy as np
 from losses.sinkhorn_knopp import SinkhornKnopp
 from utils.utils import model_statistics
@@ -291,7 +291,7 @@ def test(args, model, original_model, val_dataloader, best_head, prefix):
 
     results = {}
     for head in range(args.num_heads):
-        _res = split_cluster_acc_v4(all_labels, all_preds[head], num_seen=args.num_labeled_classes, draw=True)
+        _res = split_cluster_acc_v3(all_labels, all_preds[head], num_seen=args.num_labeled_classes, draw=True)
         for key, value in _res.items():
             if key in results.keys():
                 results[key].append(value)

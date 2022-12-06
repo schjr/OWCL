@@ -198,49 +198,6 @@ import torch
 #
 #     return res
 
-def split_cluster_acc_v3(y_true, y_pred, num_seen, head_num, iteration_num):
-    """
-    Evaluate confusion matrix on two subsets of data, as defined by the mask 'mask'
-    (Mask usually corresponding to `Old' and `New' classes in GCD setting)
-    :param targets: All ground truth labels
-    :param preds: All predictions
-    :param mask: Mask defining two subsets
-    :return: A confusion matrix in png format, along with the statistics
-    """
-
-    mask = y_true < num_seen
-    y_true = y_true.astype(int)
-    y_pred = y_pred.astype(int)
-
-    seen_acc = np.mean(y_true[mask] == y_pred[mask])
-
-    novel_acc = cluster_acc(y_true[~mask], y_pred[~mask])
-    novel_nmi = metrics.normalized_mutual_info_score(y_true[~mask], y_pred[~mask])
-    novel_ari = metrics.adjusted_rand_score(y_true[~mask], y_pred[~mask])
-
-    all_acc = cluster_acc(y_true, y_pred)
-    all_nmi = metrics.normalized_mutual_info_score(y_true[mask], y_pred[mask])
-    all_ari = metrics.adjusted_rand_score(y_true[mask], y_pred[mask])
-
-    assignment, w = compute_best_mapping(y_true, y_pred)
-    assert y_true.size == y_pred.size
-    # y_corr_pred = np.zeros_like(y_pred)
-    # for target, pred in assignment:
-    #     y_corr_pred[y_pred == pred] = target
-    # conf_mat = confusion_matrix(y_true, y_corr_pred)
-    txt_dump_path = os.path.join("data/imgs/confusion_matrix", f'head-{head_num}-iter-{iteration_num}-ConfMat.txt')
-    assign_dump_path = os.path.join("data/imgs/confusion_matrix", f'head-{head_num}-iter-{iteration_num}-AssignMent.txt')
-    mat_dump_path = os.path.join("data/imgs/confusion_matrix", f'head-{head_num}-iter-{iteration_num}-ConfMat.mat')
-    np.savetxt(txt_dump_path, w)
-    np.savetxt(assign_dump_path, assignment)
-    io.savemat(mat_dump_path, {"coff_mat": w, "assignment": assignment})
-
-
-
-    return {"all": all_acc, "all_nmi": all_nmi, "all_ari": all_ari, "seen": seen_acc,
-            "novel": novel_acc, "novel_nmi": novel_nmi, "novel_ari": novel_ari}
-
-
 def compute_best_mapping_refined(y_true, y_pred, num_seen):
     """
     Calculate clustering mapping. Require scikit-learn installed
@@ -284,7 +241,7 @@ def cluster_acc_refined(y_true, y_pred, num_seen):
     return sum([w[i, j] for i, j in mapping]) * 1.0 / y_pred.size
 
 
-def split_cluster_acc_v4(y_true, y_pred, num_seen, draw=False):
+def split_cluster_acc_v3(y_true, y_pred, num_seen, draw=False):
     """
     Evaluate clustering metrics on two subsets of data, as defined by the mask 'mask'
     (Mask usually corresponding to `Old' and `New' classes in GCD setting)
@@ -292,7 +249,8 @@ def split_cluster_acc_v4(y_true, y_pred, num_seen, draw=False):
     :param targets: All ground truth labels
     :param preds: All predictions
     :param mask: Mask defining two subsets
-    :return:
+    :param draw: Whether to generate confusion matrix
+    :return: accuracies
     """
 
     mask = y_true < num_seen
