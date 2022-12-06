@@ -96,10 +96,25 @@ def main(args):
         original_model.load_state_dict(state_dict, strict=False)
 
     if args.arch == "resnet18":
-        print("Fine tuning feature after layer4.")
+        if args.freeze_layer > 0:
+            print("Fine tuning feature after layer", args.freeze_layer)
         for name, param in model.named_parameters():
-            if 'head' not in name and 'layer4' not in name:
-                param.requires_grad = False
+            if args.freeze_layer == 4:
+                if 'head' not in name and 'layer4' not in name:
+                    param.requires_grad = False
+            elif args.freeze_layer == 3:
+                if 'head' not in name and 'layer4' not in name and 'layer3' not in name:
+                    param.requires_grad = False
+            elif args.freeze_layer == 2:
+                if 'head' not in name and 'layer4' not in name and 'layer3' not in name \
+                and 'layer2' not in name:
+                    param.requires_grad = False
+            elif args.freeze_layer == 1:
+                if 'head' not in name and 'layer4' not in name and 'layer3' not in name \
+                and 'layer2' not in name and 'layer1' not in name:
+                    param.requires_grad = False
+
+        # Freeze the original network
         for name, param in original_model.named_parameters():
             param.requires_grad = False
 
@@ -134,7 +149,7 @@ def main(args):
     if args.resume:
         # Load checkpoint.
         print('==> Resuming from checkpoint..')
-        checkpoint = torch.load('model_path/discover-resnet18-CIFAR10Con-UNO-continual-55-5-5-10_198checkpoint.pth.tar')
+        checkpoint = torch.load('model_path/YOUR_MODEL_NAME.tar')
         start_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -143,8 +158,8 @@ def main(args):
         loss_per_head = train(args, model, original_model, sk, loss_per_head, train_dataloader, optimizer, scheduler, wandb)
         best_head = torch.argmin(loss_per_head)
         # best_head = 0
-        test_results = test(args, model, original_model, test_dataloader, best_head, prefix="test")
-        train_results = test(args, model, original_model, val_dataloader, best_head, prefix="train")
+        test_results = test(args, model, original_model, test_dataloader, best_head, prefix="test", task_aware=args.task_aware)
+        train_results = test(args, model, original_model, val_dataloader, best_head, prefix="train", task_aware=args.task_aware)
 
         scheduler.step()
 
@@ -256,7 +271,7 @@ def train(args, model, original_model, sk, loss_per_head, train_dataloader, opti
 
 
 @torch.no_grad()
-def test(args, model, original_model, val_dataloader, best_head, prefix):
+def test(args, model, original_model, val_dataloader, best_head, prefix, task_aware=False):
     model.eval()
     all_labels = None
     all_preds = None
@@ -269,13 +284,39 @@ def test(args, model, original_model, val_dataloader, best_head, prefix):
             outputs = model(images)
             original_outputs = original_model(images)
 
-            preds_inc = torch.cat(
-                [
-                    original_outputs["logits_lab"].unsqueeze(0).expand(args.num_heads, -1, -1),
-                    outputs["logits_unlab"],
-                ],
-                dim=-1,
-            )
+            # Task aware setting
+            # Kind of slow
+            if task_aware:
+                original_flatten = original_outputs["logits_lab"].unsqueeze(0).expand(args.num_heads, -1, -1)
+                flatten = outputs["logits_lab"].unsqueeze(0).expand(args.num_heads, -1, -1)
+                real_logits_lab = torch.zeros_like(original_flatten)
+                real_logits_unlab = torch.zeros_like(outputs["logits_unlab"])
+
+                for j in range(len(labels)):
+                    if labels[j] in range(args.num_labeled_classes):
+                        real_logits_lab[:,j] = original_flatten[:,j]
+                        real_logits_unlab[:,j] = original_outputs["logits_unlab"][:,j]
+                    else:
+                        real_logits_lab[:,j] = flatten[:,j]
+                        real_logits_unlab[:,j] = outputs["logits_unlab"][:,j]
+
+                preds_inc = torch.cat(
+                    [
+                        real_logits_lab,
+                        real_logits_unlab,
+                    ],
+                    dim=-1,
+                )
+
+            # Task agnostic setting
+            else:
+                preds_inc = torch.cat(
+                    [
+                        original_outputs["logits_lab"].unsqueeze(0).expand(args.num_heads, -1, -1),
+                        outputs["logits_unlab"],
+                    ],
+                    dim=-1,
+                )
 
             preds_inc = preds_inc.max(dim=-1)[1]
 
@@ -321,7 +362,7 @@ if __name__ == "__main__":
     parser.add_argument("--momentum_opt", default=0.9, type=float, help="momentum for optimizer")
     parser.add_argument("--weight_decay_opt", default=1.5e-4, type=float, help="weight decay")
     parser.add_argument("--warmup_epochs", default=10, type=int, help="warmup epochs")
-    parser.add_argument("--max_epochs", default=10, type=int, help="warmup epochs")
+    parser.add_argument("--max_epochs", default=10, type=int, help="num of training epochs")
 
     parser.add_argument("--arch", default="resnet18", type=str, help="backbone architecture")
     parser.add_argument("--proj_dim", default=256, type=int, help="projected dim")
@@ -348,6 +389,8 @@ if __name__ == "__main__":
     parser.add_argument("--regenerate", default=False, action="store_true", help="whether to generate data again")
     parser.add_argument("--resume", default=False, action="store_true", help="whether to use old model")
     parser.add_argument("--save-model", default=False, action="store_true", help="whether to save model")
+    parser.add_argument("--freeze_layer", default=-1, type=int, help="Freeze from some layer in resnet")
+    parser.add_argument("--task_aware", default=False, action="store_true", help="Task aware evaluation")
 
     args = parser.parse_args()
     args.num_classes = args.num_labeled_classes + args.num_unlabeled_classes

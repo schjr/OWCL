@@ -10,7 +10,7 @@ from data.cifar import get_cifar_datasets
 # from data.herbarium_19 import get_herbarium_datasets
 from data.StanfordCars import get_stanford_datasets
 from data.Imagenet100 import get_imagenet100_datasets
-from data.TinyImagenet import get_tinyimagenet_con_datasets, get_tinyimagenet_datasets
+from data.TinyImagenet import get_tinyimagenet_datasets
 # from data.CUB200 import get_cub200_datasets
 # from data.fgvc_aircraft import get_aircraft_datasets
 #
@@ -27,9 +27,7 @@ from torch.utils.data import Subset, Dataset
 import numpy as np
 import torch
 import ipdb
-from data.cifar_con import get_cifar_continual_datasets
 from model.MultiHeadResNet import MultiHeadResNetWithDirectFeats
-import pickle as pkl
 import os
 import sys
 
@@ -37,11 +35,8 @@ import sys
 get_dataset_funcs = {
     'CIFAR10': functools.partial(get_cifar_datasets, dataset="CIFAR10"),
     'CIFAR100': functools.partial(get_cifar_datasets, dataset="CIFAR100"),
-    'CIFAR10Con': functools.partial(get_cifar_continual_datasets, dataset="CIFAR10"),
-    'CIFAR100Con': functools.partial(get_cifar_continual_datasets, dataset="CIFAR100"),
     'ImageNet100': get_imagenet100_datasets,
-    'TinyImageNet': get_tinyimagenet_datasets,
-    'TinyImageNetCon': get_tinyimagenet_con_datasets,
+    'TinyImagenet': get_tinyimagenet_datasets,
     # 'herbarium_19': get_herbarium_datasets,
     # 'CUB200': get_cub200_datasets,
     # 'aircraft': get_aircraft_datasets,
@@ -146,126 +141,6 @@ def get_TRSSL_datasets(dataset_name, args, temp_uncr):
     datasets["train_dataset"] = DiscoverDataset(datasets['train_label_dataset'], datasets['train_unlabel_dataset'])
 
     return datasets
-
-
-
-
-# ========== #
-# Deprecated #
-def get_simple_replay_datasets(dataset_name, args):
-
-    if dataset_name not in get_dataset_funcs.keys():
-        raise ValueError(f"dataset_name:{dataset_name}, not in {list(get_dataset_funcs.keys())}")
-    # Get transform
-    transform_train = get_transforms(
-        "unsupervised",
-        args.dataset,
-        multicrop=args.multicrop,
-        num_large_crops=args.num_large_crops,
-        num_small_crops=args.num_small_crops,
-    )
-    transform_uncr = get_transforms(
-        "unsupervised",
-        args.dataset,
-        num_large_crops=10,
-    )
-    transform_val = get_transforms("eval", args.dataset)
-
-    # Get datasets
-    get_dataset_f = get_dataset_funcs[dataset_name]
-    datasets = get_dataset_f(transform_train, transform_val, args.num_labeled_classes, args.num_unlabeled_classes,
-                             args.ratio, regenerate=args.regenerate, transform_uncr=transform_uncr)
-
-    # For each labelled class, we choose the first two elements for replay
-    memory_replay_indices = []
-    for i in range(50):
-        memory_replay_indices.append(i * 500) #The labelled training set contains 25000 data with 50 classes. ratio is 100.
-        memory_replay_indices.append(i * 500 + 1) #The 500 should be num_of_all_samples*(num_labelled/(num_labelled+num_unlabelled))*(ratio/100)*(1/num_labelled)
-    train_labelled_dataset = datasets['train_label_dataset']
-    memory_replay_dataset = Subset(dataset=train_labelled_dataset, indices=memory_replay_indices)
-
-    # We have to add the labelled training set into the validation set, otherwise during the training, the seen result is unknown.
-    # There is still doubt about what to be put into validation set.
-    datasets["val_dataset"].indices = np.concatenate((datasets["val_dataset"].indices, np.array(memory_replay_indices)))
-
-    datasets["train_dataset"] = DiscoverDataset(memory_replay_dataset, datasets['train_unlabel_dataset'])
-    print("Lens of simple replay dataset: {}, lens of val dataset: "
-          "{}".format(len(memory_replay_dataset), len(datasets["val_dataset"])))
-    return datasets
-
-
-# ========== #
-# Deprecated #
-def get_mean_var_datasets(dataset_name, args):
-    """
-    :return: train_dataset: MergedDataset which concatenates pseudo labelled and all unlabelled
-             test_dataset,
-             unlabelled_train_examples_test,
-             datasets
-    """
-
-    if dataset_name not in get_dataset_funcs.keys():
-        raise ValueError(f"dataset_name:{dataset_name}, not in {list(get_dataset_funcs.keys())}")
-    # Get transform
-    transform_train = get_transforms(
-        "unsupervised",
-        args.dataset,
-        multicrop=args.multicrop,
-        num_large_crops=args.num_large_crops,
-        num_small_crops=args.num_small_crops,
-    )
-    transform_uncr = get_transforms(
-        "unsupervised",
-        args.dataset,
-        num_large_crops=10,
-    )
-    transform_val = get_transforms("eval", args.dataset)
-
-    # Get datasets
-    get_dataset_f = get_dataset_funcs[dataset_name]
-    datasets = get_dataset_f(transform_train, transform_val, args.num_labeled_classes, args.num_unlabeled_classes,
-                             args.ratio, regenerate=args.regenerate, transform_uncr=transform_uncr)
-
-    # For each labelled class, we generate num_replicates pseudo data for replay
-    num_labeled_classes = 50
-    train_labelled_dataset = datasets['train_label_dataset']
-    means = []
-    stds = []
-    for i in range(num_labeled_classes):
-        # real_index stands for indexes of all data whose label is i
-        real_index = np.nonzero(np.array(train_labelled_dataset.dataset.targets) == i)[0]
-        # index is the real_index confined in train dataset
-        index = np.intersect1d(real_index, train_labelled_dataset.indices)
-        #tensorlist records all data in train dataset whose label is i
-        tensorlist = []
-        coset = Subset(train_labelled_dataset, index)
-        for j in range(len(coset)):
-            tensorlist.append(coset.dataset.dataset.data[j])
-        tensorlist = torch.tensor(tensorlist, dtype=torch.float32)
-        means.append(torch.mean(tensorlist))
-        stds.append(torch.std(tensorlist))
-    assert len(means) == num_labeled_classes
-    pseudo_datas = []
-    pseudo_targets = []
-    num_replicates = 5
-    for i in range(num_labeled_classes):
-        for j in range(num_replicates):
-            # each data has four views
-            views_list = []
-            for _ in range(2):
-                views_list.append(torch.normal(means[i], stds[i], (3, 32, 32)))
-            for _ in range(2):
-                views_list.append(torch.normal(means[i], stds[i], (3, 18, 18)))
-            pseudo_datas.append(views_list)
-            pseudo_targets.append(i)
-    
-    my_pseudo_dataset = PseudoDataset(pseudo_datas, pseudo_targets)
-
-    datasets["train_dataset"] = DiscoverDataset(my_pseudo_dataset, datasets['train_unlabel_dataset'])
-    print("Lens of pseudo dataset: {}, lens of val dataset: "
-          "{}".format(len(my_pseudo_dataset), len(datasets["val_dataset"])))
-    return datasets
-
 
 # ========== #
 

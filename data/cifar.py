@@ -53,70 +53,72 @@ class CustomCIFAR100(CIFAR100):
 
 
 def get_cifar_datasets(transform_train, transform_val, num_labeled_classes,
-                       num_unlabeled_classes, ratio, dataset="CIFAR100",
-                       regenerate=False, transform_uncr=None):
+                       num_unlabeled_classes, dataset="CIFAR100",
+                       regenerate=False, val_ratio=10, choice_ratio=100, label_val_ratio=10):
     if dataset == "CIFAR10":
         train_dataset = CustomCIFAR10(cifar_10_root, train=True, transform=transform_train)
         val_dataset = CustomCIFAR10(cifar_10_root, train=True, transform=transform_val)
         test_dataset = CustomCIFAR10(cifar_10_root, train=False, transform=transform_val)
-        uncr_dataset = CustomCIFAR10(cifar_10_root, train=True, transform=transform_uncr)
-
 
     elif dataset == "CIFAR100":
-        # label的temp怎么办呢
         train_dataset = CustomCIFAR100(cifar_100_root, train=True, transform=transform_train)
         val_dataset = CustomCIFAR100(cifar_100_root, train=True, transform=transform_val)
         test_dataset = CustomCIFAR100(cifar_100_root, train=False, transform=transform_val)
-        uncr_dataset = CustomCIFAR100(cifar_100_root, train=True, transform=transform_uncr)
 
     else:
         raise NotImplementedError("cifar10 or cifar100")
 
     # split dataset
-    dump_path = os.path.join("data/splits", f'{dataset}-labeled-{num_labeled_classes}'
-                                            f'-unlabeled-{num_unlabeled_classes}-ratio-{int(ratio)}.pkl')
+    dump_path = os.path.join("data/splits", f'{dataset}-labeled-{num_labeled_classes}-label_val_ratio-{label_val_ratio}'
+                                            f'-unlabeled-{num_unlabeled_classes}-choice_ratio-{choice_ratio}-replay.pkl')
     labeled_classes = range(num_labeled_classes)
 
     if regenerate:
         train_indices_lab = []
+        val_indices_lab = []
+        train_indices_unlab = []
+        val_indices_unlab = []
         for lc in labeled_classes:
-            idx = np.nonzero(np.array(train_dataset.targets) == lc)[0]  # labeled里面每一类的位置
-            idx = np.random.choice(idx, int(ratio * len(idx) / 100), False)
-            train_indices_lab.extend(idx)
+            idx = np.nonzero(np.array(train_dataset.targets) == lc)[0]  # labelled里面每一类的位置
+            all_val_indices = np.random.choice(idx, int(label_val_ratio * len(idx) / 100), False)
+            val_indices = np.random.choice(all_val_indices, int(choice_ratio * len(all_val_indices) / 100), False)
+            val_indices_lab.extend(val_indices)
 
-        train_indices_unlab = np.array(list(set(range(len(train_dataset))) - set(train_indices_lab)))
+            all_train_indices = np.array(list(set(idx) - set(val_indices)))
+            train_indices = np.random.choice(all_train_indices, int(choice_ratio * len(all_train_indices) / 100), False)
+            train_indices_lab.extend(train_indices)
+        
+        total_num_classes = num_labeled_classes + num_unlabeled_classes
+        for ulc in range(num_labeled_classes, total_num_classes):
+            idx = np.nonzero(np.array(train_dataset.targets) == ulc)[0]  # unlabelled里面每一类的位置
+            val_indices = np.random.choice(idx, int(val_ratio * len(idx) / 100), False)
+            val_indices_unlab.extend(val_indices)
+            train_indices = np.array(list(set(idx) - set(val_indices)))
+            train_indices_unlab.extend(train_indices)
+
         train_indices_lab = np.array(train_indices_lab)
+        train_indices_unlab = np.array(train_indices_unlab)
+        val_indices_lab = np.array(val_indices_lab)
+        val_indices_unlab = np.array(val_indices_unlab)
+
         with open(dump_path, "wb") as f:
-            pkl.dump({"lab": train_indices_lab, "unlab": train_indices_unlab}, f)
+            pkl.dump({"train_lab": train_indices_lab, "train_unlab": train_indices_unlab, "val_lab" : val_indices_lab, "val_unlab": val_indices_unlab}, f)
     else:
         if not os.path.exists(dump_path):
-            raise FileNotFoundError(f"Dump_path is not exists: {dump_path}")
+            raise FileNotFoundError(f"Dump_path does not exists: {dump_path}")
 
         with open(dump_path, "rb") as f:
             indices = pkl.load(f)
-        train_indices_lab, train_indices_unlab = indices["lab"], indices["unlab"]
+        train_indices_lab, train_indices_unlab, val_indices_lab, val_indices_unlab = indices["train_lab"], indices["train_unlab"], indices["val_lab"], indices["val_unlab"]
 
     train_label_dataset = torch.utils.data.Subset(train_dataset, train_indices_lab)
     train_unlabel_dataset = torch.utils.data.Subset(train_dataset, train_indices_unlab)
-    uncr_unlabel_dataset = torch.utils.data.Subset(uncr_dataset, train_indices_unlab)
+    val_unlab_dataset = torch.utils.data.Subset(val_dataset, val_indices_unlab)
+    val_seen_dataset = torch.utils.data.Subset(val_dataset, val_indices_lab)
 
-
-    # seen class
-    val_indices_seen = np.where(np.isin(np.array(val_dataset.targets), labeled_classes))[0]
-    val_indices_seen = np.intersect1d(val_indices_seen, train_indices_unlab)
-    val_seen_dataset = torch.utils.data.Subset(val_dataset, val_indices_seen)
-    val_unlab_dataset = torch.utils.data.Subset(val_dataset, train_indices_unlab)
-
-    # test set
-    test_indices_seen = np.where(np.isin(np.array(test_dataset.targets), labeled_classes))[0]
-    test_seen_dataset = torch.utils.data.Subset(test_dataset, test_indices_seen)
-    test_indices_unseen = np.where(~np.isin(np.array(test_dataset.targets), labeled_classes))[0]
-    test_unseen_dataset = torch.utils.data.Subset(test_dataset, test_indices_unseen)
-    # ipdb.set_trace()
     all_datasets = {"train_label_dataset": train_label_dataset, "train_unlabel_dataset": train_unlabel_dataset,
                     "val_dataset": val_unlab_dataset, "val_seen_dataset": val_seen_dataset,
-                    "test_dataset": test_dataset, "test_seen_dataset": test_seen_dataset,
-                    "test_unseen_dataset": test_unseen_dataset, "uncr_unlabel_dataset":uncr_unlabel_dataset}
+                    "test_dataset": test_dataset}
     return all_datasets
 
 
